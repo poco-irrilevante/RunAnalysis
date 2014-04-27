@@ -7,7 +7,8 @@ The goal for this project is to prepare a tidy data set from the original data t
 
   - Manual unzipping of the data
   - Reading and consolidating the train and test data using R
-  - Saving the data
+  - Change the column headers
+  - Save the data
 
 One of the most exciting areas in all of data science right now is wearable computing - see for example  [WearableComputerRevolution] . Companies like Fitbit, Nike, and Jawbone Up are racing to develop the most advanced algorithms to attract new users. The data linked to from the course website represent data collected from the accelerometers from the Samsung Galaxy S smartphone
 
@@ -21,116 +22,94 @@ Unzip the [Dataset]. It creates a folder structure "UCI HAR Dataset" containing 
 
 > Step 2 Reading and consolidating the train and test data using R
 
-The run_analysis.R script takes care of this step. I will explain the script section by section.
-First load the LaF package to work with fixed width files
+The read_data.R script takes care of this step. As the mechanics for reading the train and test data it makes sense to wrap it into a function.
+
+The script reads the column names from the features file. As the excersise only requires columns that contain a mean or a standard deviation, we filter on both substrings. 
 
 ```
-install.packages("LaF") # for processing fixed width files
-library(LaF)
+read_data <- function(directory, name) {
+  cnames <- read.table(paste0(directory,"/features.txt"),sep=' ', stringsAsFactors=FALSE)[,2]
+  # filter on only mean & std
+  cnames_filtered <- grepl("ean|std",cnames)
+                           
+  # Read the activity labels
+  labels <- read.table(paste0(directory,"/activity_labels.txt"), sep=' ', stringsAsFactors=FALSE)
+  colnames(labels) <- c("ActivityCode", "ActivityName")
+  
+  # Read data, activity code
+  data_x <- read.table(paste0(directory,"/",name,"/x_",name,".txt"))
+  colnames(data_x) <- cnames
+  # filter on only mean & std
+  data_filtered <- data_x[,cnames_filtered]
+  
+  # Read activity
+  activity <- read.table(paste0(directory,"/",name,"/y_",name,".txt"))
+  colnames(activity) = c("ActivityCode")
+  
+  # Merge activity and activity labels
+  activitiesMerged <- merge(activity,labels)
+  
+  # read subject 
+  subject <- read.table(paste0(directory,"/",name,"/subject_",name,".txt"))
+  colnames(subject) <- c("Subject")
+  
+  # combine the columns and return the data
+  data <- cbind(data_filtered, activitiesMerged, subject)
+  data
+}
+```
+To beatify the columns to a more meaningful description, we use the [gsub] command. [gsub] replaces all matches of a string, if the parameter is a string vector, returns a string vector of the same length and with the same attributes (after possible coercion to character). Elements of string vectors which are not substituted will be returned unchanged.
 
 ```
-As mentioned above I use the "UCI HAR Dataset folder as the working directory. 
+renderColumnName <- function(column) {
+  ## replace '-' to '.'
+  v <- gsub("-", ".", column)
+  
+  ## replace trailing '()'
+  v <- gsub("\\(\\)", "", v)
+  
+  ## fix mean
+  v <- gsub("mean", "Mean", v)
+  
+  ## replace leading 't' to 'Timed'
+  v <- gsub("^t", "Timed", v)
+  
+  ## replace leading 'f' to 'FTT'
+  v <- gsub("^f", "FTT", v)
+  
+  ## extend abbreviations to full name
+  v <- gsub("std", "StandardDeviation", v)
+  v <- gsub("Acc", "Accelerometer", v)
+  v <- gsub("Gyro", "Gyroscope", v)
+  v <- gsub("Mag", "Magnitude", v)
+  v <- gsub("Jerk", "JerkSignals", v)
+  v <- gsub("Freq", "Frequency", v)
+  as.character(v)
+}
+```
+Now that we have to tools we can focus on the run_analysis.R script.
 
 ```
-setwd("~/Courses/R-GettIngAndCleaningData/Data/UCI HAR Dataset")
+## R Getting and Cleaning Data Peer Assessment 
+source("read_data.R") #sub routine for reading from tran and test set
+source("renderColumnName.R") # for rendering column names
+## Set the working directory. 
+setwd("~/Courses/R-GettIngAndCleaningData/Data/RunAnalysis")
+directory <- "~/Courses/R-GettIngAndCleaningData/Data/RunAnalysis/UCI HAR Dataset"
+
+
+# read the train and testdata 
+train <- read_data(directory,"train")
+test <- read_data(directory,"test")
+consolidated <- rbind(train, test)
 
 ```
+> Step 3. Fix the column names
 
-The next step is to read in the labels, this may sound weird, normally one would start with the data, and add the labels at a later stages. The labels are stored in the file "features.txt" in the root folder and use a blank as a speparator. As we want the labels as string we must set the stringsAsFactors parameter to false. The columnCount variable keeps track on the number of columns.
-
-
-```
-cnames <- read.table("./features.txt",sep=' ', stringsAsFactors=FALSE)[,2]
-columnCount <- length(cnames)
-columnCount
-
-[1] 561
-
-str(cnames)
-
- chr [1:561] "tBodyAcc-mean()-X" "tBodyAcc-mean()-Y" "tBodyAcc-mean()-Z" "tBodyAcc-std()-X" "tBodyAcc-std()-Y" ...
-```
-
-Now that we have the labels and the number of columns (561) we can read the actual data. I will again store the total characters in a line into a variable "lineWidth". We will use the readLines method to read the lines. 
+This step is no more than a single line added to the run_analysis.R script, calling the renderColumnName function with the consolidated data frame column names.
 
 ```
-lineWidth <- nchar(readLines("./train/X_train.txt")[1])
-lineWidth
-
-[1] 8976
-```
-
-We can now calculate the "width" of each column. (All columns have in this case the same size). 
-
-```
-columnWidth <- lineWidth / columnCount
-columnWidth
-
-[1] 16
-```
-We have now sufficient information to read the information into a dataset using the "laf_open_fwf" command. One fragment needs an additional explanation. we use the "rep" command to create a vector with 561 times column widths or column types
-
-```
-rep("double", columnCount)
-rep(columnWidth,columnCount)
-```
-
-Let's create a connection to the data and store give it the name "file"
-
-```
-file <- laf_open_fwf(filename = "./train/X_train.txt",
-                      column_types=rep("double", columnCount),
-                      column_names=cnames,
-                      column_widths=rep(columnWidth,columnCount))
-```
-As the request was only to provide the means and standard deviations, contained in the first six columns we can subset the data to these columns and name the data frame "train".
-
-```
-train <- file[,1:6]
-```
-
-We are now able to look at the structure of the data frame, using the "str" command.
-
-```
-str(train)
-
-'data.frame':	7352 obs. of  6 variables:
- $ tBodyAcc.mean...X: num  0.289 0.278 0.28 0.279 0.277 ...
- $ tBodyAcc.mean...Y: num  -0.0203 -0.0164 -0.0195 -0.0262 -0.0166 ...
- $ tBodyAcc.mean...Z: num  -0.133 -0.124 -0.113 -0.123 -0.115 ...
- $ tBodyAcc.std...X : num  -0.995 -0.998 -0.995 -0.996 -0.998 ...
- $ tBodyAcc.std...Y : num  -0.983 -0.975 -0.967 -0.983 -0.981 ...
- $ tBodyAcc.std...Z : num  -0.914 -0.96 -0.979 -0.991 -0.99 ...
-```
-
-As a small safety I add a variable to count the number of rows within the dataset to ensure I do not miss entries when combining or consolidating data. I name it "trainRowcount".
-
-```
-trainrowCount <- nrow(train)
-```
-
-The previous procedure is also required for the "test" data. I will not explain the individual steps.
-```
-file2 <- laf_open_fwf(filename = "./test/X_test.txt",
-                     column_types=rep("double", columnCount),
-                     column_names=cnames,
-                     column_widths=rep(columnWidth,columnCount))
-## again only the means and stds
-test <- file2[,1:6]
-str(test)
-testrowCount <- nrow(test)
-```
-The next step is to combine both data frames into a single data frame called "tidy", using the rbind command. We also will rename the column names to shorter ones. 
-
-```
-tidy <- rbind(train,test)
-colnames(tidy) = c("mean.X", "mean.Y", "mean.Z","std.X", "std.Y", "std.Z")
-```
-
-And check if the total rows match the total count for the train and test set. 
-
-```
-nrow(tidy)==trainrowCount+testrowCount
+colnames(consolidated) <- renderColumnName(colnames(consolidated))
 ```
 
 > Saving the data
@@ -138,13 +117,13 @@ nrow(tidy)==trainrowCount+testrowCount
 We use the write.csv command to save the data into the working directory for further analysis.
 
 ```
-write.csv(tidy, "tidy.csv", row.names=FALSE)
+write.csv(consolidated, "tidy.csv", row.names=FALSE)
 ```
 
 Version
 ----
 
-0.1 Initial commit
+0.2 Changed the functionality of the program as the initial version only contained the first 6 columns and means and standard deviations also occur in the other columns.
 
 
 [SmartphoneActivity]:http://archive.ics.uci.edu/ml/datasets/Human+Activity+Recognition+Using+Smartphones
@@ -152,6 +131,7 @@ Version
 [Getting and Cleaning Data]:https://class.coursera.org/getdata-002
 [Dataset]:https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip
 [7-zip]:http://www.7-zip.org
+[gsub]:http://www.endmemo.com/program/R/gsub.php
 
 
     
